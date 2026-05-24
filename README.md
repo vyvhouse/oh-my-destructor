@@ -21,19 +21,19 @@ For agent-specific operating instructions, see [AGENT_GUIDE.md](./AGENT_GUIDE.md
 Preview first:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --dry-run
 ```
 
 Remove locally:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes
 ```
 
 Remove on an SSH host:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --target macmini --yes
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --target macmini --yes
 ```
 
 ## What The Current Script Removes

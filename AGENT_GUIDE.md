@@ -33,19 +33,19 @@ It removes Oh My Claude Code (OMC) artifacts only. Do not claim that it removes 
 Dry-run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --dry-run
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --dry-run
 ```
 
 Remove:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes
 ```
 
 Remove history/cache only when the user explicitly asks:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes --remove-history --remove-backups
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes --remove-history --remove-backups
 ```
 
 ## OMC SSH Usage
@@ -53,13 +53,13 @@ curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstall
 Dry-run on a host such as `macmini`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --target macmini --dry-run
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --target macmini --dry-run
 ```
 
 Remove on `macmini`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/IYENTeam/oh-my-claudecode-uninstaller/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --target macmini --yes
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --target macmini --yes
 ```
 
 ## Verification Checklist
