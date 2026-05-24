@@ -1,0 +1,25 @@
+id: project-slug
+name: Project Name
+repo: OWNER/REPO
+version: 0.1.0
+status: draft
+supported_platforms:
+  - darwin
+  - linux
+script: ../../scripts/uninstall-project-slug.sh
+manual: ../../docs/removers/project-slug.md
+dry_run: true
+ssh_supported: true
+requires_sudo: false
+description: Short description of what this remover removes.
+remove_list:
+  - ~/.example-project
+not_removed_by_default:
+  - historical prompt logs
+  - unrelated plugins
+  - GitHub stars
+verification_commands:
+  - command -v example || true
+unstar:
+  repo: OWNER/REPO
+  command: gh repo unstar OWNER/REPO

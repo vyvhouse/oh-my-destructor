@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -u
+
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+usage() {
+  cat <<'USAGE'
+oh-my-destructor dispatcher
+
+Usage:
+  bin/uninstall --list
+  bin/uninstall <slug> [script options]
+
+Examples:
+  bin/uninstall --list
+  bin/uninstall oh-my-claudecode --dry-run
+  bin/uninstall oh-my-claudecode --target macmini --yes
+USAGE
+}
+
+list_removers() {
+  cat <<'LIST'
+available:
+  oh-my-claudecode  Remove Oh My Claude Code artifacts
+
+planned:
+  oh-my-openagent   Future remover for Oh My Open Agent
+  oh-my-codex       Future remover for Oh My Codex
+LIST
+}
+
+if [ "$#" -eq 0 ]; then
+  usage
+  exit 2
+fi
+
+case "$1" in
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  --list)
+    list_removers
+    exit 0
+    ;;
+esac
+
+slug=$1
+shift
+
+case "$slug" in
+  oh-my-claudecode)
+    exec "$ROOT_DIR/scripts/uninstall-oh-my-claudecode.sh" "$@"
+    ;;
+  oh-my-openagent|oh-my-codex)
+    printf 'Remover for %s is planned but not implemented yet.\n' "$slug" >&2
+    exit 3
+    ;;
+  *)
+    printf 'Unknown remover: %s\n\n' "$slug" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

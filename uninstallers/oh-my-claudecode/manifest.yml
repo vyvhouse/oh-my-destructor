@@ -1,0 +1,36 @@
+id: oh-my-claudecode
+name: Oh My Claude Code
+repo: Yeachan-Heo/oh-my-claudecode
+version: 0.1.0
+status: available
+supported_platforms:
+  - darwin
+  - linux
+script: ../../scripts/uninstall-oh-my-claudecode.sh
+manual: ../../docs/removers/oh-my-claudecode.md
+dry_run: true
+ssh_supported: true
+requires_sudo: false
+description: Removes OMC artifacts from Claude Code user config, plugins, MCP settings, and global npm runtime.
+remove_list:
+  - ~/.omc
+  - ~/.claude/.omc*
+  - ~/.claude/hud
+  - ~/.claude/plugins/marketplaces/omc
+  - ~/.claude/plugins/cache/omc
+  - ~/.claude/plugins/oh-my-claudecode
+  - oh-my-claude-sisyphus global npm package
+not_removed_by_default:
+  - ~/.claude/history.jsonl
+  - backup/cache history files
+  - unrelated Claude plugins
+  - unrelated MCP servers
+  - GitHub stars
+verification_commands:
+  - command -v omc || true
+  - npm list -g --depth=0 2>/dev/null | grep -Ei 'oh-my-claudecode|oh-my-claude-sisyphus|omc' || true
+  - claude plugin list 2>&1 || true
+  - claude mcp list 2>&1 || true
+unstar:
+  repo: Yeachan-Heo/oh-my-claudecode
+  command: gh repo unstar Yeachan-Heo/oh-my-claudecode

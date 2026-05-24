@@ -1,0 +1,20 @@
+version: 1
+removers:
+  - id: oh-my-claudecode
+    name: Oh My Claude Code
+    status: available
+    manifest: ../uninstallers/oh-my-claudecode/manifest.yml
+    script: ../scripts/uninstall-oh-my-claudecode.sh
+    manual: ../docs/removers/oh-my-claudecode.md
+  - id: oh-my-openagent
+    name: Oh My Open Agent
+    status: planned
+    manifest: null
+    script: ../scripts/uninstall-oh-my-openagent.sh
+    manual: null
+  - id: oh-my-codex
+    name: Oh My Codex
+    status: planned
+    manifest: null
+    script: ../scripts/uninstall-oh-my-codex.sh
+    manual: null

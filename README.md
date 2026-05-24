@@ -6,7 +6,18 @@ This repository hosts agent-native uninstall scripts for people who want help re
 
 Current coverage is intentionally narrow and truthful: the included script removes [Oh My Claude Code](https://github.com/Yeachan-Heo/oh-my-claudecode) artifacts only. This repository is meant to grow into a home for uninstallers for related tools such as Oh My Open Agent, Oh My Claude Code, Oh My Codex, and other `oh-my-*` projects.
 
-For agent-specific operating instructions, see [AGENT_GUIDE.md](./AGENT_GUIDE.md).
+For agent-specific operating instructions, see [AGENT_GUIDE.md](./AGENT_GUIDE.md). For the machine-readable catalog and contributor scaffold, see [`manifests/index.yml`](./manifests/index.yml) and [`docs/`](./docs/).
+
+## Repository Layout
+
+```text
+bin/uninstall                         Dispatcher for supported removers.
+scripts/uninstall-<project>.sh        Runnable uninstall scripts.
+uninstallers/<project>/manifest.yml   Per-project metadata for agents.
+docs/removers/<project>.md            Per-project human manual.
+templates/                            Starter templates for new removers.
+manifests/index.yml                   Catalog of available and planned removers.
+```
 
 ## Available Scripts
 
@@ -15,6 +26,12 @@ For agent-specific operating instructions, see [AGENT_GUIDE.md](./AGENT_GUIDE.md
 | `scripts/uninstall-oh-my-claudecode.sh` | Available | Remove Oh My Claude Code (OMC) from Claude Code local or SSH targets. |
 | `scripts/uninstall-oh-my-openagent.sh` | Planned | Future remover for Oh My Open Agent artifacts. |
 | `scripts/uninstall-oh-my-codex.sh` | Planned | Future remover for Oh My Codex artifacts. |
+
+List supported removers through the dispatcher:
+
+```bash
+bin/uninstall --list
+```
 
 ## Quick Start
 
@@ -34,6 +51,13 @@ Remove on an SSH host:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --target macmini --yes
+```
+
+If you cloned the repository, you can use the dispatcher instead:
+
+```bash
+bin/uninstall oh-my-claudecode --dry-run
+bin/uninstall oh-my-claudecode --yes
 ```
 
 ## What The Current Script Removes
@@ -130,6 +154,11 @@ Each script should follow the same contract:
 - Support `--dry-run`.
 - Support `--yes` for agent runs.
 - Support `--target HOST` for SSH cleanup.
+- Add `uninstallers/<project>/manifest.yml`.
+- Add `docs/removers/<project>.md`.
+- Update `manifests/index.yml`.
 - Preserve unrelated tools and configs.
 - Document what it removes and what it refuses to remove.
 - Mention optional unstar steps separately from filesystem cleanup.
+
+Use [`docs/how-to-add-remover.md`](./docs/how-to-add-remover.md) and the files in [`templates/`](./templates/) when adding support for another project.

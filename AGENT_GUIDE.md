@@ -10,6 +10,12 @@ When a user asks to remove an oh-my tool, your job is to help them leave cleanly
 
 ## Current Coverage
 
+Agents should discover available removers from the catalog first:
+
+```text
+manifests/index.yml
+```
+
 This repository currently ships one implemented remover:
 
 ```text
@@ -17,6 +23,18 @@ scripts/uninstall-oh-my-claudecode.sh
 ```
 
 It removes Oh My Claude Code (OMC) artifacts only. Do not claim that it removes Oh My Open Agent, Oh My Codex, or other `oh-my-*` projects until matching scripts are added.
+
+## Discovery Contract
+
+Before executing anything:
+
+1. Read `manifests/index.yml`.
+2. Select only entries with `status: available`.
+3. Read the per-remover `manifest.yml` under `uninstallers/<slug>/`.
+4. Confirm the current platform is listed in `supported_platforms` when possible.
+5. Use the manifest `script` and `manual` paths as the source of truth.
+
+If the slug is planned or missing, tell the user it is not implemented yet instead of adapting another remover.
 
 ## Agent Workflow
 
@@ -46,6 +64,14 @@ Remove history/cache only when the user explicitly asks:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes --remove-history --remove-backups
+```
+
+When the repository is cloned locally, agents may use the dispatcher:
+
+```bash
+bin/uninstall --list
+bin/uninstall oh-my-claudecode --dry-run
+bin/uninstall oh-my-claudecode --yes
 ```
 
 ## OMC SSH Usage
@@ -134,4 +160,13 @@ Each script should:
 - Preserve unrelated tools, plugins, MCP servers, and histories by default.
 - Document optional unstar commands without running them implicitly.
 
-When adding a new script, update `README.md` and this guide in the same commit.
+When adding a new script, update these in the same commit:
+
+- `README.md`
+- `AGENT_GUIDE.md`, if the workflow changes
+- `manifests/index.yml`
+- `docs/INDEX.md`
+- `docs/removers/<slug>.md`
+- `uninstallers/<slug>/manifest.yml`
+
+Follow [`docs/REMOVER_SPEC.md`](./docs/REMOVER_SPEC.md) for the required contract.
