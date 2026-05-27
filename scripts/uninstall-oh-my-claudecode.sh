@@ -22,6 +22,7 @@ FORCE_IN_SESSION=0
 VERIFY_ONLY=0
 VERIFY_JSON=0
 PURGE_BACKUPS=0
+KILL_RUNNING=0
 
 # -----------------------------------------------------------------------------
 # FINGERPRINTS_JSON
@@ -99,7 +100,19 @@ FINGERPRINTS_JSON=$(cat <<'JSON'
   "history_grep": "oh-my-claudecode|oh-my-claude-sisyphus|/omc-setup|omc update|omc doctor|setup omc",
   "backup_grep": "oh-my-claudecode|oh-my-claude-sisyphus|omc-hud|omc-setup",
   "backup_path_globs": ["*/backups/*", "*/paste-cache/*", "*/file-history/*"],
-  "repo_urls": ["Yeachan-Heo/oh-my-claudecode"]
+  "repo_urls": ["Yeachan-Heo/oh-my-claudecode"],
+  "process_patterns": [
+    "oh-my-claude",
+    "/\\.omc/",
+    "omc-hud",
+    "ralph-loop",
+    "ultrawork-loop",
+    "autopilot-loop"
+  ],
+  "launchagent_globs": [
+    "*omc*.plist",
+    "*oh-my-claude*.plist"
+  ]
 }
 JSON
 )
@@ -136,6 +149,11 @@ Options:
                          under ~/.claude, and (b) user-made *.bak / *.backup /
                          *.old files in scoped directories whose contents
                          contain OMC markers. Refuses if verify did not pass.
+  --kill-running         Before file removal, terminate any live OMC
+                         processes (SIGTERM, then SIGKILL after 5s) and
+                         unload+remove matching ~/Library/LaunchAgents
+                         plists on macOS. Without this flag the script
+                         only lists matches and warns; it does not kill.
   -h, --help             Show help.
   --version              Show script version.
 
@@ -220,6 +238,7 @@ while [ "$#" -gt 0 ]; do
     --verify-only) VERIFY_ONLY=1 ;;
     --verify-json) VERIFY_JSON=1 ;;
     --purge-omc-backups) PURGE_BACKUPS=1 ;;
+    --kill-running) KILL_RUNNING=1 ;;
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "Unknown option: $1"; usage; exit 2 ;;
@@ -443,6 +462,120 @@ remove_path() {
 
 if [ "${VERIFY_ONLY:-0}" != "1" ]; then
 say "Scanning Oh My Claude Code artifacts under $HOME"
+
+# --- daemon cleanup (PR-A3) --------------------------------------------------
+# Runs before any file removal so daemons cannot recreate state mid-cleanup.
+python3 - <<'PY'
+import json
+import os
+import platform
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+home = Path.home()
+dry_run = os.environ.get("DRY_RUN") == "1"
+kill_running = os.environ.get("KILL_RUNNING") == "1"
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+patterns = list(F.get("process_patterns", []))
+la_globs = list(F.get("launchagent_globs", []))
+
+
+def find_user_pids():
+    """Return list of (pid, argv) tuples for current-user processes whose
+    argv matches any of the configured patterns. Uses ps because pgrep
+    flags differ between macOS and Linux."""
+    out = []
+    try:
+        ps = subprocess.run(
+            ["ps", "-u", str(os.getuid()), "-o", "pid=,args="],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        return out
+    import re
+    compiled = [re.compile(p) for p in patterns]
+    self_pid = str(os.getpid())
+    parent_pid = str(os.getppid())
+    for line in ps.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        pid, _, args = line.partition(" ")
+        if pid in (self_pid, parent_pid):
+            continue  # never kill ourselves or our caller shell
+        if not any(r.search(args) for r in compiled):
+            continue
+        out.append((pid, args))
+    return out
+
+
+matches = find_user_pids()
+if matches:
+    print("daemon: live OMC processes detected:")
+    for pid, args in matches:
+        print(f"  pid={pid}  {args[:120]}")
+    if dry_run:
+        if kill_running:
+            for pid, _ in matches:
+                print(f"[dry-run] kill {pid} (TERM, then KILL after 5s)")
+        else:
+            print("daemon: --kill-running not set; not terminating in dry-run")
+    elif kill_running:
+        for pid, _ in matches:
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except (OSError, ValueError):
+                pass
+        time.sleep(5)
+        survivors = find_user_pids()
+        for pid, _ in survivors:
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except (OSError, ValueError):
+                pass
+        print(f"daemon: terminated {len(matches)} process(es)")
+    else:
+        print("daemon: --kill-running not set; leaving processes alive", file=sys.stderr)
+        print("daemon: re-run with --kill-running to terminate them", file=sys.stderr)
+
+# LaunchAgents (macOS only)
+if platform.system() == "Darwin":
+    la_dir = home / "Library/LaunchAgents"
+    la_matches = []
+    if la_dir.exists():
+        for pattern in la_globs:
+            la_matches.extend(sorted(la_dir.glob(pattern)))
+    # dedupe while preserving order
+    seen = set()
+    la_matches = [p for p in la_matches if not (p in seen or seen.add(p))]
+    for plist in la_matches:
+        label = plist.stem
+        if dry_run:
+            print(f"[dry-run] launchctl bootout gui/{os.getuid()}/{label}; rm \"{plist}\"")
+        else:
+            stamp = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
+            shutil.copy2(plist, plist.with_name(plist.name + f".pre-omc-uninstall-{stamp}.bak"))
+            for cmd in (
+                ["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+                ["launchctl", "unload", str(plist)],
+            ):
+                try:
+                    subprocess.run(cmd, capture_output=True, check=False)
+                except FileNotFoundError:
+                    break
+            try:
+                plist.unlink()
+                print(f"daemon: removed LaunchAgent {plist}")
+            except OSError as exc:
+                print(f"WARN: could not remove {plist}: {exc}", file=sys.stderr)
+PY
+# --- end daemon cleanup ------------------------------------------------------
+
 json_cleanup
 
 if command -v npm >/dev/null 2>&1; then
@@ -910,6 +1043,50 @@ if omc_skills:
 else:
     record("skills-clean", "pass")
 
+# Check 8: live OMC processes
+import platform as _platform
+import re as _re
+_pat_compiled = [_re.compile(p) for p in F.get("process_patterns", [])]
+_live = []
+try:
+    _ps = subprocess.run(
+        ["ps", "-u", str(os.getuid()), "-o", "pid=,args="],
+        capture_output=True, text=True, check=False,
+    )
+    _self = str(os.getpid())
+    _parent = str(os.getppid())
+    for _line in _ps.stdout.splitlines():
+        _line = _line.strip()
+        if not _line:
+            continue
+        _pid, _, _args = _line.partition(" ")
+        if _pid in (_self, _parent):
+            continue
+        if any(r.search(_args) for r in _pat_compiled):
+            _live.append((_pid, _args[:80]))
+except FileNotFoundError:
+    record("processes-clean", "inconclusive", "ps not available")
+else:
+    if _live:
+        _summary = ", ".join(f"pid={pid}" for pid, _ in _live)
+        record("processes-clean", "fail", f"live OMC processes: {_summary}")
+    else:
+        record("processes-clean", "pass")
+
+# Check 9: LaunchAgent plists (macOS only)
+if _platform.system() == "Darwin":
+    _la_dir = home / "Library/LaunchAgents"
+    _la = []
+    if _la_dir.exists():
+        for _glob in F.get("launchagent_globs", []):
+            _la.extend(str(p) for p in _la_dir.glob(_glob))
+    if _la:
+        record("launchagents-clean", "fail", f"OMC plists: {_la}")
+    else:
+        record("launchagents-clean", "pass")
+else:
+    record("launchagents-clean", "pass", "not macOS")
+
 # Decide exit code
 has_fail = any(s == "fail" for _, s, _ in results)
 has_inc = any(s == "inconclusive" for _, s, _ in results)
@@ -1040,6 +1217,7 @@ if [ "$TARGET" != "local" ]; then
   [ "$VERIFY_ONLY" -eq 1 ] && remote_args="$remote_args --verify-only"
   [ "$VERIFY_JSON" -eq 1 ] && remote_args="$remote_args --verify-json"
   [ "$PURGE_BACKUPS" -eq 1 ] && remote_args="$remote_args --purge-omc-backups"
+  [ "$KILL_RUNNING" -eq 1 ] && remote_args="$remote_args --kill-running"
   ssh "$TARGET" "tmp=\$(mktemp); trap 'rm -f \"\$tmp\"' EXIT INT TERM; cat > \"\$tmp\"; chmod +x \"\$tmp\"; \"\$tmp\" $remote_args; rc=\$?; exit \$rc" < "$0"
   exit $?
 fi
@@ -1055,6 +1233,6 @@ fi
 
 DRY_RUN=$DRY_RUN REMOVE_HISTORY=$REMOVE_HISTORY REMOVE_BACKUPS=$REMOVE_BACKUPS \
   VERIFY_ONLY=$VERIFY_ONLY VERIFY_JSON=$VERIFY_JSON \
-  PURGE_BACKUPS=$PURGE_BACKUPS \
+  PURGE_BACKUPS=$PURGE_BACKUPS KILL_RUNNING=$KILL_RUNNING \
   run_payload
 exit $?

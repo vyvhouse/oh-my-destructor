@@ -98,3 +98,15 @@ backup_path_globs:
 
 repo_urls:
   - Yeachan-Heo/oh-my-claudecode
+
+process_patterns:
+  - oh-my-claude
+  - '/\.omc/'
+  - omc-hud
+  - ralph-loop
+  - ultrawork-loop
+  - autopilot-loop
+
+launchagent_globs:
+  - "*omc*.plist"
+  - "*oh-my-claude*.plist"
