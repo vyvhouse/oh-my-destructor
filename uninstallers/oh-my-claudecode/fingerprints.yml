@@ -1,0 +1,100 @@
+# OMC fingerprint mirror.
+#
+# This file is a human-readable mirror of the FINGERPRINTS_JSON heredoc inside
+# scripts/uninstall-oh-my-claudecode.sh. The script is the single source of
+# truth at runtime — this YAML exists for documentation, code review, and
+# external tooling (manifests/index.yml consumers, agents).
+#
+# CI runs scripts/check-fingerprints-sync.py which fails the build if this
+# file drifts from the script's embedded JSON. When you change either side,
+# update both in the same commit.
+
+terms:
+  - oh-my-claudecode
+  - plugin_oh-my-claudecode
+  - oh-my-claude-sisyphus
+  - omc-hud
+  - omc-setup
+
+raw_substrings:
+  - '"omc"'
+
+marketplace_known_keys:
+  - omc
+
+claudemd_block:
+  - "<!-- OMC:START -->"
+  - "<!-- OMC:END -->"
+
+npm_packages:
+  - oh-my-claude-sisyphus
+
+bin_paths:
+  - /usr/local/bin/omc
+  - /opt/homebrew/bin/omc
+  - $HOME/.local/bin/omc
+
+bin_link_target_substrings:
+  - oh-my-claude-sisyphus
+  - oh-my-claudecode
+
+bin_content_grep: "oh-my-claude|oh-my-claudecode"
+
+state_dirs:
+  - $HOME/.omc
+  - $HOME/.claude/.omc
+  - $HOME/.claude/.omc-config.json
+  - $HOME/.claude/.omc-version.json
+  - $HOME/.claude/hud
+  - $HOME/.claude/plugins/oh-my-claudecode
+  - $HOME/.claude/plugins/marketplaces/omc
+  - $HOME/.claude/plugins/cache/omc
+
+json_files:
+  - .claude/settings.json
+  - .claude/plugins/installed_plugins.json
+  - .claude/plugins/known_marketplaces.json
+  - .claude/mcp.json
+  - .claude.json
+
+hook_scan_dirs:
+  - .claude/hooks
+  - .claude/agents
+
+hook_name_substrings:
+  - omc
+  - claudecode
+
+hook_text_markers:
+  - oh-my-claudecode
+  - oh-my-claude-sisyphus
+  - omc-hud
+  - omc-setup
+
+skill_root: .claude/skills
+
+skill_name_prefixes:
+  - "omc-"
+
+skill_names_explicit:
+  - omc-reference
+  - omc-setup
+  - omc-doctor
+  - omc-teams
+  - omc-plan
+
+skill_text_markers:
+  - oh-my-claudecode
+  - oh-my-claude-sisyphus
+
+history_path: .claude/history.jsonl
+history_grep: "oh-my-claudecode|oh-my-claude-sisyphus|/omc-setup|omc update|omc doctor|setup omc"
+
+backup_grep: "oh-my-claudecode|oh-my-claude-sisyphus|omc-hud|omc-setup"
+backup_path_globs:
+  - "*/backups/*"
+  - "*/paste-cache/*"
+  - "*/file-history/*"
+
+repo_urls:
+  - Yeachan-Heo/oh-my-claudecode
