@@ -8,6 +8,8 @@ TARGET="local"
 REMOVE_HISTORY=0
 REMOVE_BACKUPS=0
 FORCE_IN_SESSION=0
+VERIFY_ONLY=0
+VERIFY_JSON=0
 
 # -----------------------------------------------------------------------------
 # FINGERPRINTS_JSON
@@ -111,8 +113,21 @@ Options:
                          CLAUDE_PROJECT_DIR is set, because OMC's already-
                          loaded hooks in the running agent can intercept
                          cleanup. Has no effect with --target.
+  --verify-only          Skip removal. Run only the verification phase and
+                         exit with a tri-state code: 0 (clean), 2 (residue
+                         found), 3 (one or more checks could not be run).
+                         Combine with --verify-json for machine output.
+  --verify-json          Emit verification results as a JSON document to
+                         stdout. Human-readable summary still goes to stderr.
   -h, --help             Show help.
   --version              Show script version.
+
+Exit codes after a normal run or --verify-only:
+  0   verify PASS (no residue found across every check)
+  2   verify FAIL (at least one OMC artifact remains)
+  3   verify INCONCLUSIVE (at least one check could not be executed,
+       e.g. npm or claude CLI missing) with no FAIL outcomes
+  4   refused to run from inside an active Claude Code session
 
 What it removes:
   - OMC npm package: oh-my-claude-sisyphus, if installed globally.
@@ -185,6 +200,8 @@ while [ "$#" -gt 0 ]; do
     --remove-history) REMOVE_HISTORY=1 ;;
     --remove-backups) REMOVE_BACKUPS=1 ;;
     --force-in-session) FORCE_IN_SESSION=1 ;;
+    --verify-only) VERIFY_ONLY=1 ;;
+    --verify-json) VERIFY_JSON=1 ;;
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "Unknown option: $1"; usage; exit 2 ;;
@@ -382,6 +399,7 @@ remove_path() {
   fi
 }
 
+if [ "${VERIFY_ONLY:-0}" != "1" ]; then
 say "Scanning Oh My Claude Code artifacts under $HOME"
 json_cleanup
 
@@ -571,6 +589,161 @@ if [ "${REMOVE_BACKUPS:-0}" = "1" ] && [ -d "$HOME/.claude" ]; then
 fi
 
 say "Done."
+fi # end !VERIFY_ONLY removal block
+
+VERIFY_JSON="${VERIFY_JSON:-0}" python3 - <<'PY'
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+home = Path.home()
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+json_mode = os.environ.get("VERIFY_JSON") == "1"
+
+results = []  # list of (name, status, detail)
+
+
+def record(name, status, detail=""):
+    results.append((name, status, detail))
+
+
+# Check 1: `omc` command not resolvable
+proc = subprocess.run(["bash", "-c", "command -v omc"], capture_output=True, text=True)
+if proc.returncode == 0 and proc.stdout.strip():
+    record("omc-binary-absent", "fail", f"resolvable at {proc.stdout.strip()}")
+else:
+    record("omc-binary-absent", "pass")
+
+# Check 2: npm OMC packages absent
+if shutil.which("npm"):
+    proc = subprocess.run(
+        ["npm", "list", "-g", "--depth=0", "--json"],
+        capture_output=True, text=True,
+    )
+    try:
+        data = json.loads(proc.stdout) if proc.stdout else {}
+    except json.JSONDecodeError:
+        data = {}
+    deps = data.get("dependencies", {}) if isinstance(data, dict) else {}
+    present = [pkg for pkg in F["npm_packages"] if pkg in deps]
+    if present:
+        record("npm-packages-absent", "fail", f"globally installed: {present}")
+    else:
+        record("npm-packages-absent", "pass")
+else:
+    record("npm-packages-absent", "inconclusive", "npm not available")
+
+# Check 3: state and plugin directories absent
+present_state = []
+for d in F["state_dirs"]:
+    p = Path(d.replace("$HOME", str(home)))
+    if p.exists() or p.is_symlink():
+        present_state.append(str(p))
+if present_state:
+    record("state-dirs-absent", "fail", f"present: {present_state}")
+else:
+    record("state-dirs-absent", "pass")
+
+# Check 4: JSON config files clean of OMC markers
+omc_terms = tuple(F["terms"])
+raw_subs = tuple(F["raw_substrings"])
+
+
+def has_omc_text(text):
+    lower = text.lower()
+    if any(t in lower for t in omc_terms):
+        return True
+    return any(r in lower for r in raw_subs)
+
+
+dirty_files = []
+unreadable_files = []
+for rel in F["json_files"]:
+    p = home / rel
+    if not p.exists():
+        continue
+    try:
+        text = p.read_text()
+    except OSError as exc:
+        unreadable_files.append(f"{p}: {exc}")
+        continue
+    if has_omc_text(text):
+        dirty_files.append(str(p))
+if dirty_files:
+    record("json-configs-clean", "fail", f"OMC markers in: {dirty_files}")
+elif unreadable_files:
+    record("json-configs-clean", "inconclusive", "; ".join(unreadable_files))
+else:
+    record("json-configs-clean", "pass")
+
+# Check 5: CLAUDE.md OMC block absent
+claudemd = home / ".claude/CLAUDE.md"
+start_marker, end_marker = F["claudemd_block"]
+if claudemd.exists():
+    text = claudemd.read_text(errors="replace")
+    if start_marker in text and end_marker in text:
+        record("claudemd-block-absent", "fail", "OMC marker block present")
+    else:
+        record("claudemd-block-absent", "pass")
+else:
+    record("claudemd-block-absent", "pass", "CLAUDE.md not present")
+
+# Check 6: OMC skill directories absent
+skills = home / F["skill_root"]
+omc_skills = []
+explicit = set(F["skill_names_explicit"])
+prefixes = tuple(F["skill_name_prefixes"])
+if skills.exists():
+    for child in skills.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name in explicit:
+            omc_skills.append(child.name)
+        elif any(child.name.startswith(p) for p in prefixes):
+            omc_skills.append(child.name)
+if omc_skills:
+    record("skills-clean", "fail", f"OMC skill dirs: {omc_skills}")
+else:
+    record("skills-clean", "pass")
+
+# Decide exit code
+has_fail = any(s == "fail" for _, s, _ in results)
+has_inc = any(s == "inconclusive" for _, s, _ in results)
+if has_fail:
+    exit_code = 2
+elif has_inc:
+    exit_code = 3
+else:
+    exit_code = 0
+
+if json_mode:
+    out = {
+        "checks": [
+            {"name": n, "status": s, "detail": d} for n, s, d in results
+        ],
+        "exit": exit_code,
+    }
+    print(json.dumps(out, indent=2))
+else:
+    print("", file=sys.stderr)
+    print("verify:", file=sys.stderr)
+    width = max(len(n) for n, _, _ in results) if results else 0
+    for n, s, d in results:
+        marker = {"pass": "PASS", "fail": "FAIL", "inconclusive": "INCO"}[s]
+        line = f"  [{marker}] {n.ljust(width)}"
+        if d:
+            line += f"  {d}"
+        print(line, file=sys.stderr)
+    summary = {0: "PASS", 2: "FAIL", 3: "INCONCLUSIVE"}[exit_code]
+    print(f"  -> {summary} (exit {exit_code})", file=sys.stderr)
+
+sys.exit(exit_code)
+PY
+verify_exit=$?
+exit $verify_exit
 PAYLOAD
 }
 
@@ -586,14 +759,22 @@ if [ "$TARGET" != "local" ]; then
   [ "$YES" -eq 1 ] && remote_args="$remote_args --yes"
   [ "$REMOVE_HISTORY" -eq 1 ] && remote_args="$remote_args --remove-history"
   [ "$REMOVE_BACKUPS" -eq 1 ] && remote_args="$remote_args --remove-backups"
+  [ "$VERIFY_ONLY" -eq 1 ] && remote_args="$remote_args --verify-only"
+  [ "$VERIFY_JSON" -eq 1 ] && remote_args="$remote_args --verify-json"
   ssh "$TARGET" "tmp=\$(mktemp); cat > \"\$tmp\"; chmod +x \"\$tmp\"; \"\$tmp\" $remote_args; rc=\$?; rm -f \"\$tmp\"; exit \$rc" < "$0"
   exit $?
 fi
 
-[ "$YES" -eq 1 ] || [ "$DRY_RUN" -eq 1 ] || {
-  printf 'Remove Oh My Claude Code from this machine? [y/N] '
-  read -r answer
-  case "$answer" in y|Y|yes|YES) ;; *) printf 'Aborted.\n'; exit 1 ;; esac
-}
+# --verify-only does not write; skip the confirmation prompt.
+if [ "$VERIFY_ONLY" -ne 1 ]; then
+  [ "$YES" -eq 1 ] || [ "$DRY_RUN" -eq 1 ] || {
+    printf 'Remove Oh My Claude Code from this machine? [y/N] '
+    read -r answer
+    case "$answer" in y|Y|yes|YES) ;; *) printf 'Aborted.\n'; exit 1 ;; esac
+  }
+fi
 
-DRY_RUN=$DRY_RUN REMOVE_HISTORY=$REMOVE_HISTORY REMOVE_BACKUPS=$REMOVE_BACKUPS run_payload
+DRY_RUN=$DRY_RUN REMOVE_HISTORY=$REMOVE_HISTORY REMOVE_BACKUPS=$REMOVE_BACKUPS \
+  VERIFY_ONLY=$VERIFY_ONLY VERIFY_JSON=$VERIFY_JSON \
+  run_payload
+exit $?
