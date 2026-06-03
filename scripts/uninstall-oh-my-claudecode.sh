@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-set -u
+# Bash 3.2 compatible — no mapfile/readarray, no ${var^^}.
+set -uo pipefail
+TMPFILES=""
+_omd_cleanup() {
+  if [ -n "$TMPFILES" ]; then
+    # space-separated list; iterate safely under set -u
+    for _f in $TMPFILES; do
+      [ -e "$_f" ] && rm -f "$_f" 2>/dev/null
+    done
+  fi
+}
+trap _omd_cleanup EXIT INT TERM
 
 VERSION="0.1.0"
 DRY_RUN=0
@@ -251,7 +262,16 @@ fi
 
 run_payload() {
   bash -s <<'PAYLOAD'
-set -u
+set -uo pipefail
+_payload_tmpfiles=""
+_payload_cleanup() {
+  if [ -n "$_payload_tmpfiles" ]; then
+    for _f in $_payload_tmpfiles; do
+      [ -e "$_f" ] && rm -f "$_f" 2>/dev/null
+    done
+  fi
+}
+trap _payload_cleanup EXIT INT TERM
 
 say() { printf '%s\n' "$*"; }
 do_run() {
@@ -287,6 +307,7 @@ PY
 
 json_cleanup() {
 python3 - <<'PY'
+import fcntl
 import json
 import os
 import shutil
@@ -322,7 +343,21 @@ def write_json(path: Path, data):
         print(f"[dry-run] update JSON {path}")
         return
     backup(path)
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    new_text = json.dumps(data, indent=2) + "\n"
+    # Locked write: hold LOCK_EX while truncating and writing so a concurrent
+    # editor cannot observe a half-written file. On filesystems where flock
+    # is unavailable we fall through silently — the worst case is the prior
+    # behavior.
+    mode = "r+" if path.exists() else "w"
+    with open(path, mode) as fh:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        except (OSError, AttributeError):
+            pass
+        if mode == "r+":
+            fh.seek(0)
+            fh.truncate()
+        fh.write(new_text)
 
 for rel in json_files:
     path = home / rel
@@ -656,9 +691,18 @@ if km_path.exists():
             if dry_run:
                 print(f"[dry-run] update JSON {km_path}")
             else:
+                import fcntl
                 stamp = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
                 shutil.copy2(km_path, km_path.with_name(km_path.name + f".pre-omc-uninstall-{stamp}.bak"))
-                km_path.write_text(json.dumps(data, indent=2) + "\n")
+                new_text = json.dumps(data, indent=2) + "\n"
+                with open(km_path, "r+") as fh:
+                    try:
+                        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                    except (OSError, AttributeError):
+                        pass
+                    fh.seek(0)
+                    fh.truncate()
+                    fh.write(new_text)
 PY
 
 if [ "${REMOVE_HISTORY:-0}" = "1" ]; then
@@ -1073,7 +1117,7 @@ if [ "$TARGET" != "local" ]; then
   [ "$VERIFY_ONLY" -eq 1 ] && remote_args="$remote_args --verify-only"
   [ "$VERIFY_JSON" -eq 1 ] && remote_args="$remote_args --verify-json"
   [ "$PURGE_BACKUPS" -eq 1 ] && remote_args="$remote_args --purge-omc-backups"
-  ssh "$TARGET" "tmp=\$(mktemp); cat > \"\$tmp\"; chmod +x \"\$tmp\"; \"\$tmp\" $remote_args; rc=\$?; rm -f \"\$tmp\"; exit \$rc" < "$0"
+  ssh "$TARGET" "tmp=\$(mktemp); trap 'rm -f \"\$tmp\"' EXIT INT TERM; cat > \"\$tmp\"; chmod +x \"\$tmp\"; \"\$tmp\" $remote_args; rc=\$?; exit \$rc" < "$0"
   exit $?
 fi
 
