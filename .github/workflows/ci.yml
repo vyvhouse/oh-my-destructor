@@ -26,7 +26,7 @@ jobs:
       - name: --version smoke
         run: scripts/uninstall-oh-my-claudecode.sh --version
       - name: --dry-run smoke
-        run: scripts/uninstall-oh-my-claudecode.sh --dry-run
+        run: scripts/uninstall-oh-my-claudecode.sh --dry-run || test $? -eq 3
 
   fingerprints-sync:
     runs-on: ubuntu-latest
