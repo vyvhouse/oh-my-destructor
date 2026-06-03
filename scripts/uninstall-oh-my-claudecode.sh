@@ -8,6 +8,88 @@ TARGET="local"
 REMOVE_HISTORY=0
 REMOVE_BACKUPS=0
 
+# -----------------------------------------------------------------------------
+# FINGERPRINTS_JSON
+#
+# Single source of truth for every OMC identifier this script touches.
+# A human-readable mirror lives at uninstallers/oh-my-claudecode/fingerprints.yml.
+# CI enforces that the two stay in sync (scripts/check-fingerprints-sync.py).
+#
+# All match logic — Python heredocs and shell-side loops — reads from this
+# block via the FINGERPRINTS_JSON environment variable. Do not introduce new
+# inline marker literals elsewhere in the script; add them here.
+# -----------------------------------------------------------------------------
+FINGERPRINTS_JSON=$(cat <<'JSON'
+{
+  "terms": [
+    "oh-my-claudecode",
+    "plugin_oh-my-claudecode",
+    "oh-my-claude-sisyphus",
+    "omc-hud",
+    "omc-setup"
+  ],
+  "raw_substrings": ["\"omc\""],
+  "marketplace_known_keys": ["omc"],
+  "claudemd_block": ["<!-- OMC:START -->", "<!-- OMC:END -->"],
+  "npm_packages": ["oh-my-claude-sisyphus"],
+  "bin_paths": [
+    "/usr/local/bin/omc",
+    "/opt/homebrew/bin/omc",
+    "$HOME/.local/bin/omc"
+  ],
+  "bin_link_target_substrings": [
+    "oh-my-claude-sisyphus",
+    "oh-my-claudecode"
+  ],
+  "bin_content_grep": "oh-my-claude|oh-my-claudecode",
+  "state_dirs": [
+    "$HOME/.omc",
+    "$HOME/.claude/.omc",
+    "$HOME/.claude/.omc-config.json",
+    "$HOME/.claude/.omc-version.json",
+    "$HOME/.claude/hud",
+    "$HOME/.claude/plugins/oh-my-claudecode",
+    "$HOME/.claude/plugins/marketplaces/omc",
+    "$HOME/.claude/plugins/cache/omc"
+  ],
+  "json_files": [
+    ".claude/settings.json",
+    ".claude/plugins/installed_plugins.json",
+    ".claude/plugins/known_marketplaces.json",
+    ".claude/mcp.json",
+    ".claude.json"
+  ],
+  "hook_scan_dirs": [".claude/hooks", ".claude/agents"],
+  "hook_name_substrings": ["omc", "claudecode"],
+  "hook_text_markers": [
+    "oh-my-claudecode",
+    "oh-my-claude-sisyphus",
+    "omc-hud",
+    "omc-setup"
+  ],
+  "skill_root": ".claude/skills",
+  "skill_name_prefixes": ["omc-"],
+  "skill_names_explicit": [
+    "omc-reference",
+    "omc-setup",
+    "omc-doctor",
+    "omc-teams",
+    "omc-plan"
+  ],
+  "skill_text_markers": [
+    "oh-my-claudecode",
+    "oh-my-claude-sisyphus"
+  ],
+  "history_path": ".claude/history.jsonl",
+  "history_grep": "oh-my-claudecode|oh-my-claude-sisyphus|/omc-setup|omc update|omc doctor|setup omc",
+  "backup_grep": "oh-my-claudecode|oh-my-claude-sisyphus|omc-hud|omc-setup",
+  "backup_path_globs": ["*/backups/*", "*/paste-cache/*", "*/file-history/*"],
+  "repo_urls": ["Yeachan-Heo/oh-my-claudecode"]
+}
+JSON
+)
+export FINGERPRINTS_JSON
+
 usage() {
   cat <<'USAGE'
 uninstall-oh-my-claudecode.sh - remove Oh My Claude Code (OMC) from Claude Code
@@ -73,6 +155,29 @@ do_run() {
   fi
 }
 
+# Helper: emit values from a top-level FINGERPRINTS_JSON array key,
+# one per line, with $HOME expanded.
+fp_list() {
+  python3 - "$1" <<'PY'
+import json, os, sys
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+for item in F[sys.argv[1]]:
+    if isinstance(item, str):
+        print(item.replace("$HOME", os.environ["HOME"]))
+    else:
+        print(item)
+PY
+}
+
+# Helper: emit a top-level scalar (string) from FINGERPRINTS_JSON.
+fp_get() {
+  python3 - "$1" <<'PY'
+import json, os, sys
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+print(F[sys.argv[1]])
+PY
+}
+
 json_cleanup() {
 python3 - <<'PY'
 import json
@@ -84,20 +189,21 @@ from pathlib import Path
 home = Path.home()
 dry_run = os.environ.get("DRY_RUN") == "1"
 stamp = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
-omc_terms = (
-    "oh-my-claudecode",
-    "plugin_oh-my-claudecode",
-    "oh-my-claude-sisyphus",
-    "omc-hud",
-    "omc-setup",
-)
+
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+omc_terms = tuple(F["terms"])
+raw_substrings = tuple(F["raw_substrings"])
+marketplace_known_keys = list(F["marketplace_known_keys"])
+json_files = list(F["json_files"])
 
 def has_omc(value):
     try:
         text = json.dumps(value).lower()
     except Exception:
         text = str(value).lower()
-    return any(term in text for term in omc_terms) or '"omc"' in text
+    if any(term in text for term in omc_terms):
+        return True
+    return any(raw in text for raw in raw_substrings)
 
 def backup(path: Path):
     if dry_run or not path.exists():
@@ -111,13 +217,7 @@ def write_json(path: Path, data):
     backup(path)
     path.write_text(json.dumps(data, indent=2) + "\n")
 
-for rel in (
-    ".claude/settings.json",
-    ".claude/plugins/installed_plugins.json",
-    ".claude/plugins/known_marketplaces.json",
-    ".claude/mcp.json",
-    ".claude.json",
-):
+for rel in json_files:
     path = home / rel
     if not path.exists():
         continue
@@ -138,9 +238,11 @@ for rel in (
             if not plugins:
                 data.pop("enabledPlugins", None)
         markets = data.get("extraKnownMarketplaces")
-        if isinstance(markets, dict) and "omc" in markets:
-            del markets["omc"]
-            changed = True
+        if isinstance(markets, dict):
+            for known in marketplace_known_keys:
+                if known in markets:
+                    del markets[known]
+                    changed = True
             if not markets:
                 data.pop("extraKnownMarketplaces", None)
         status = data.get("statusLine")
@@ -163,9 +265,10 @@ for rel in (
                     changed = True
 
     elif rel == ".claude/plugins/known_marketplaces.json":
-        if "omc" in data:
-            del data["omc"]
-            changed = True
+        for known in marketplace_known_keys:
+            if known in data:
+                del data[known]
+                changed = True
 
     elif rel == ".claude/mcp.json":
         servers = data.get("mcpServers")
@@ -211,46 +314,53 @@ say "Scanning Oh My Claude Code artifacts under $HOME"
 json_cleanup
 
 if command -v npm >/dev/null 2>&1; then
-  do_run "npm uninstall -g oh-my-claude-sisyphus >/dev/null 2>&1 || true"
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    do_run "npm uninstall -g $pkg >/dev/null 2>&1 || true"
+  done < <(fp_list npm_packages)
 else
   say "npm not found; skipping npm package uninstall"
 fi
 
-for bin in /usr/local/bin/omc /opt/homebrew/bin/omc "$HOME/.local/bin/omc"; do
+BIN_CONTENT_GREP=$(fp_get bin_content_grep)
+while IFS= read -r bin; do
+  [ -n "$bin" ] || continue
   if [ -L "$bin" ]; then
     target=$(readlink "$bin" 2>/dev/null || true)
-    case "$target" in
-      *oh-my-claude-sisyphus*|*oh-my-claudecode*) remove_path "$bin" ;;
-    esac
-  elif [ -f "$bin" ] && grep -qi "oh-my-claude\|oh-my-claudecode" "$bin" 2>/dev/null; then
+    match=0
+    while IFS= read -r sub; do
+      case "$target" in
+        *${sub}*) match=1; break ;;
+      esac
+    done < <(fp_list bin_link_target_substrings)
+    [ "$match" = "1" ] && remove_path "$bin"
+  elif [ -f "$bin" ] && grep -qiE "$BIN_CONTENT_GREP" "$bin" 2>/dev/null; then
     remove_path "$bin"
   fi
-done
+done < <(fp_list bin_paths)
 
-for path in \
-  "$HOME/.omc" \
-  "$HOME/.claude/.omc" \
-  "$HOME/.claude/.omc-config.json" \
-  "$HOME/.claude/.omc-version.json" \
-  "$HOME/.claude/hud" \
-  "$HOME/.claude/plugins/oh-my-claudecode" \
-  "$HOME/.claude/plugins/marketplaces/omc" \
-  "$HOME/.claude/plugins/cache/omc"; do
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
   remove_path "$path"
-done
+done < <(fp_list state_dirs)
 
 python3 - <<'PY'
+import json
 import os
 import shutil
 from pathlib import Path
 
 home = Path.home()
 dry_run = os.environ.get("DRY_RUN") == "1"
-markers = ("oh-my-claudecode", "oh-my-claude-sisyphus", "omc-hud", "omc-setup")
+
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+markers = tuple(F["hook_text_markers"])
+name_substrings = tuple(F["hook_name_substrings"])
+scan_dirs = list(F["hook_scan_dirs"])
 
 def marked(path: Path) -> bool:
     name = path.name.lower()
-    if "omc" in name or "claudecode" in name:
+    if any(sub in name for sub in name_substrings):
         return True
     if path.is_file():
         try:
@@ -268,7 +378,7 @@ def remove(path: Path):
     else:
         path.unlink(missing_ok=True)
 
-for rel in (".claude/hooks", ".claude/agents"):
+for rel in scan_dirs:
     root = home / rel
     if not root.exists():
         continue
@@ -287,6 +397,7 @@ for rel in (".claude/hooks", ".claude/agents"):
 PY
 
 python3 - <<'PY'
+import json
 import os
 import shutil
 from datetime import datetime
@@ -294,36 +405,46 @@ from pathlib import Path
 
 home = Path.home()
 dry_run = os.environ.get("DRY_RUN") == "1"
+
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+start_marker, end_marker = F["claudemd_block"]
+
 path = home / ".claude/CLAUDE.md"
 if path.exists():
     text = path.read_text(errors="replace")
-    start = text.find("<!-- OMC:START -->")
-    end = text.find("<!-- OMC:END -->")
+    start = text.find(start_marker)
+    end = text.find(end_marker)
     if start != -1 and end != -1:
         if dry_run:
             print(f"[dry-run] remove OMC block from {path}")
         else:
             stamp = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
             shutil.copy2(path, path.with_name(path.name + f".pre-omc-uninstall-{stamp}.bak"))
-            end += len("<!-- OMC:END -->")
+            end += len(end_marker)
             new = (text[:start] + text[end:]).strip()
             path.write_text(new + ("\n" if new else ""))
 PY
 
 python3 - <<'PY'
+import json
 import os
 import shutil
 from pathlib import Path
 
 home = Path.home()
 dry_run = os.environ.get("DRY_RUN") == "1"
-skills = home / ".claude/skills"
-explicit_omc_names = {"omc-reference", "omc-setup", "omc-doctor", "omc-teams", "omc-plan"}
+
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+skills = home / F["skill_root"]
+prefixes = tuple(F["skill_name_prefixes"])
+explicit_omc_names = set(F["skill_names_explicit"])
+text_markers = tuple(F["skill_text_markers"])
+
 if skills.exists():
     for child in skills.iterdir():
         if not child.is_dir():
             continue
-        hit = child.name.startswith("omc-") or child.name in explicit_omc_names
+        hit = any(child.name.startswith(p) for p in prefixes) or child.name in explicit_omc_names
         if not hit:
             for file in child.rglob("*"):
                 if not file.is_file():
@@ -332,7 +453,7 @@ if skills.exists():
                     text = file.read_text(errors="ignore").lower()
                 except Exception:
                     continue
-                if "oh-my-claudecode" in text or "oh-my-claude-sisyphus" in text:
+                if any(marker in text for marker in text_markers):
                     hit = True
                     break
         if hit:
@@ -342,19 +463,36 @@ if skills.exists():
                 shutil.rmtree(child)
 PY
 
-if [ "${REMOVE_HISTORY:-0}" = "1" ] && [ -f "$HOME/.claude/history.jsonl" ]; then
-  if [ "${DRY_RUN:-0}" = "1" ]; then
-    printf '[dry-run] scrub OMC lines from %s\n' "$HOME/.claude/history.jsonl"
-  else
-    cp "$HOME/.claude/history.jsonl" "$HOME/.claude/history.jsonl.pre-omc-uninstall.$(date +%Y%m%d%H%M%S).bak"
-    grep -viE "oh-my-claudecode|oh-my-claude-sisyphus|/omc-setup|omc update|omc doctor|setup omc" "$HOME/.claude/history.jsonl" > "$HOME/.claude/history.jsonl.tmp" || true
-    mv "$HOME/.claude/history.jsonl.tmp" "$HOME/.claude/history.jsonl"
+if [ "${REMOVE_HISTORY:-0}" = "1" ]; then
+  HISTORY_REL=$(fp_get history_path)
+  HISTORY_GREP=$(fp_get history_grep)
+  HISTORY_FILE="$HOME/$HISTORY_REL"
+  if [ -f "$HISTORY_FILE" ]; then
+    if [ "${DRY_RUN:-0}" = "1" ]; then
+      printf '[dry-run] scrub OMC lines from %s\n' "$HISTORY_FILE"
+    else
+      cp "$HISTORY_FILE" "$HISTORY_FILE.pre-omc-uninstall.$(date +%Y%m%d%H%M%S).bak"
+      grep -viE "$HISTORY_GREP" "$HISTORY_FILE" > "$HISTORY_FILE.tmp" || true
+      mv "$HISTORY_FILE.tmp" "$HISTORY_FILE"
+    fi
   fi
 fi
 
 if [ "${REMOVE_BACKUPS:-0}" = "1" ] && [ -d "$HOME/.claude" ]; then
-  find "$HOME/.claude" \( -path "*/backups/*" -o -path "*/paste-cache/*" -o -path "*/file-history/*" \) -type f 2>/dev/null | while IFS= read -r file; do
-    if grep -qiE "oh-my-claudecode|oh-my-claude-sisyphus|omc-hud|omc-setup" "$file" 2>/dev/null; then
+  BACKUP_GREP=$(fp_get backup_grep)
+  FIND_EXPR=""
+  first=1
+  while IFS= read -r glob; do
+    [ -n "$glob" ] || continue
+    if [ "$first" = "1" ]; then
+      FIND_EXPR="-path \"$glob\""
+      first=0
+    else
+      FIND_EXPR="$FIND_EXPR -o -path \"$glob\""
+    fi
+  done < <(fp_list backup_path_globs)
+  eval "find \"$HOME/.claude\" \\( $FIND_EXPR \\) -type f 2>/dev/null" | while IFS= read -r file; do
+    if grep -qiE "$BACKUP_GREP" "$file" 2>/dev/null; then
       remove_path "$file"
     fi
   done
