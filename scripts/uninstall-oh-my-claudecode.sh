@@ -23,6 +23,7 @@ VERIFY_ONLY=0
 VERIFY_JSON=0
 PURGE_BACKUPS=0
 KILL_RUNNING=0
+SCAN_PROJECTS=""
 
 # -----------------------------------------------------------------------------
 # FINGERPRINTS_JSON
@@ -154,6 +155,12 @@ Options:
                          unload+remove matching ~/Library/LaunchAgents
                          plists on macOS. Without this flag the script
                          only lists matches and warns; it does not kill.
+  --scan-projects DIR    Also clean OMC residue in the named project
+                         directory: .omc/ (with tarball backup),
+                         <!-- OMC:START --> ... <!-- OMC:END --> block
+                         in CLAUDE.md, OMC entries in .claude/settings.json
+                         and .mcp.json. Repeatable. Refuses if DIR equals
+                         $HOME. Opt-in; no auto-walking.
   -h, --help             Show help.
   --version              Show script version.
 
@@ -239,6 +246,15 @@ while [ "$#" -gt 0 ]; do
     --verify-json) VERIFY_JSON=1 ;;
     --purge-omc-backups) PURGE_BACKUPS=1 ;;
     --kill-running) KILL_RUNNING=1 ;;
+    --scan-projects)
+      shift
+      [ -n "${1:-}" ] || { warn '--scan-projects requires a directory'; exit 2; }
+      if [ -z "$SCAN_PROJECTS" ]; then
+        SCAN_PROJECTS="$1"
+      else
+        SCAN_PROJECTS="$SCAN_PROJECTS"$'\n'"$1"
+      fi
+      ;;
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "Unknown option: $1"; usage; exit 2 ;;
@@ -872,6 +888,168 @@ if [ "${REMOVE_BACKUPS:-0}" = "1" ] && [ -d "$HOME/.claude" ]; then
   done
 fi
 
+# --- per-project scan (PR-A4) -----------------------------------------------
+if [ -n "${SCAN_PROJECTS:-}" ]; then
+python3 - <<'PY'
+import json
+import os
+import shutil
+import sys
+import tarfile
+from datetime import datetime
+from pathlib import Path
+
+home = Path.home().resolve()
+dry_run = os.environ.get("DRY_RUN") == "1"
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+omc_terms = tuple(F["terms"])
+raw_substrings = tuple(F["raw_substrings"])
+marketplace_known_keys = list(F["marketplace_known_keys"])
+start_marker, end_marker = F["claudemd_block"]
+
+scan_raw = os.environ.get("SCAN_PROJECTS", "")
+dirs = [d.strip() for d in scan_raw.split("\n") if d.strip()]
+
+
+def has_omc(value):
+    try:
+        text = json.dumps(value).lower()
+    except Exception:
+        text = str(value).lower()
+    if any(t in text for t in omc_terms):
+        return True
+    return any(r in text for r in raw_substrings)
+
+
+def backup(path: Path, stamp: str):
+    shutil.copy2(path, path.with_name(path.name + f".pre-omc-uninstall-{stamp}.bak"))
+
+
+def clean_settings(path: Path, stamp: str) -> bool:
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    changed = False
+    plugins = data.get("enabledPlugins")
+    if isinstance(plugins, dict):
+        for key in list(plugins):
+            if has_omc(key):
+                del plugins[key]
+                changed = True
+        if not plugins:
+            data.pop("enabledPlugins", None)
+    markets = data.get("extraKnownMarketplaces")
+    if isinstance(markets, dict):
+        for known in marketplace_known_keys:
+            if known in markets:
+                del markets[known]
+                changed = True
+        if not markets:
+            data.pop("extraKnownMarketplaces", None)
+    status = data.get("statusLine")
+    if isinstance(status, dict) and has_omc(status):
+        data.pop("statusLine", None)
+        changed = True
+    hooks = data.get("hooks")
+    if isinstance(hooks, dict):
+        for key in list(hooks):
+            if has_omc(hooks[key]):
+                hooks[key] = [] if isinstance(hooks[key], list) else {}
+                changed = True
+    if changed:
+        if dry_run:
+            print(f"[dry-run] update JSON {path}")
+        else:
+            backup(path, stamp)
+            path.write_text(json.dumps(data, indent=2) + "\n")
+    return changed
+
+
+def clean_mcp(path: Path, stamp: str) -> bool:
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    changed = False
+    servers = data.get("mcpServers")
+    if isinstance(servers, dict):
+        for key in list(servers):
+            if has_omc(key) or has_omc(servers[key]):
+                del servers[key]
+                changed = True
+    if changed:
+        if dry_run:
+            print(f"[dry-run] update JSON {path}")
+        else:
+            backup(path, stamp)
+            path.write_text(json.dumps(data, indent=2) + "\n")
+    return changed
+
+
+for raw in dirs:
+    try:
+        target = Path(raw).resolve(strict=False)
+    except OSError as exc:
+        print(f"refused --scan-projects {raw}: {exc}", file=sys.stderr)
+        continue
+    if ".." in Path(raw).parts:
+        print(f"refused --scan-projects {raw}: contains '..' segment", file=sys.stderr)
+        continue
+    if target == home:
+        print(f"refused --scan-projects {target}: same as $HOME (use the global pass)", file=sys.stderr)
+        continue
+    if not target.is_dir():
+        print(f"scan-projects: not a directory: {target}", file=sys.stderr)
+        continue
+
+    print(f"scan-projects: scanning {target}")
+    stamp = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
+
+    omc_dir = target / ".omc"
+    if omc_dir.is_dir():
+        if dry_run:
+            print(f"[dry-run] tar+rm -rf \"{omc_dir}\"")
+        else:
+            tarball = target / f".omc.pre-omc-uninstall-{stamp}.tar.gz"
+            with tarfile.open(str(tarball), "w:gz") as tf:
+                tf.add(str(omc_dir), arcname=".omc")
+            shutil.rmtree(omc_dir)
+            print(f"scan-projects: removed {omc_dir}, backup at {tarball}")
+
+    cm = target / "CLAUDE.md"
+    if cm.is_file():
+        try:
+            text = cm.read_text(errors="replace")
+        except OSError:
+            text = ""
+        start = text.find(start_marker)
+        end = text.find(end_marker)
+        if start != -1 and end != -1:
+            if dry_run:
+                print(f"[dry-run] remove OMC block from {cm}")
+            else:
+                backup(cm, stamp)
+                end += len(end_marker)
+                new = (text[:start] + text[end:]).strip()
+                cm.write_text(new + ("\n" if new else ""))
+                print(f"scan-projects: stripped OMC block from {cm}")
+
+    cs = target / ".claude/settings.json"
+    if cs.is_file():
+        clean_settings(cs, stamp)
+
+    mc = target / ".mcp.json"
+    if mc.is_file():
+        clean_mcp(mc, stamp)
+PY
+fi
+# --- end per-project scan ---------------------------------------------------
+
 say "Done."
 fi # end !VERIFY_ONLY removal block
 
@@ -1244,6 +1422,11 @@ PAYLOAD
 
 if [ "$TARGET" != "local" ]; then
   command -v ssh >/dev/null 2>&1 || { warn 'ssh is required for --target'; exit 1; }
+  if [ -n "$SCAN_PROJECTS" ]; then
+    warn '--scan-projects refers to local paths; not forwarded over --target'
+    warn 'run --scan-projects against the local host separately'
+    exit 2
+  fi
   [ "$YES" -eq 1 ] || [ "$DRY_RUN" -eq 1 ] || {
     printf 'Remove Oh My Claude Code from SSH host %s? [y/N] ' "$TARGET"
     read -r answer
@@ -1274,5 +1457,6 @@ fi
 DRY_RUN=$DRY_RUN REMOVE_HISTORY=$REMOVE_HISTORY REMOVE_BACKUPS=$REMOVE_BACKUPS \
   VERIFY_ONLY=$VERIFY_ONLY VERIFY_JSON=$VERIFY_JSON \
   PURGE_BACKUPS=$PURGE_BACKUPS KILL_RUNNING=$KILL_RUNNING \
+  SCAN_PROJECTS="$SCAN_PROJECTS" \
   run_payload
 exit $?
