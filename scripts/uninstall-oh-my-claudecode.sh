@@ -564,6 +564,96 @@ if skills.exists():
                 shutil.rmtree(child)
 PY
 
+python3 - <<'PY'
+import json
+import os
+import shutil
+from datetime import datetime
+from pathlib import Path
+
+home = Path.home()
+dry_run = os.environ.get("DRY_RUN") == "1"
+
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+
+
+def norm_repo(s):
+    if not isinstance(s, str):
+        return ""
+    s = s.strip().lower()
+    for prefix in ("https://github.com/", "http://github.com/", "git@github.com:", "ssh://git@github.com/"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    if s.endswith(".git"):
+        s = s[:-4]
+    if s.endswith("/"):
+        s = s[:-1]
+    return s
+
+
+canon = {norm_repo(u) for u in F.get("repo_urls", []) if u}
+
+
+def candidates_from(obj):
+    if not isinstance(obj, dict):
+        return []
+    out = []
+    src = obj.get("source")
+    if isinstance(src, dict):
+        for key in ("repo", "url", "homepage", "repository"):
+            out.append(src.get(key))
+    for key in ("repo", "url", "homepage", "repository"):
+        out.append(obj.get(key))
+    return [c for c in out if isinstance(c, str)]
+
+
+def matches_omc(obj):
+    return any(norm_repo(c) in canon for c in candidates_from(obj))
+
+
+# 1. Marketplace directories whose marketplace.json points at an OMC repo.
+mkroot = home / ".claude/plugins/marketplaces"
+if mkroot.exists():
+    for child in sorted(mkroot.iterdir()):
+        if not child.is_dir():
+            continue
+        meta = child / "marketplace.json"
+        if not meta.exists():
+            continue
+        try:
+            data = json.loads(meta.read_text())
+        except Exception:
+            continue
+        if matches_omc(data):
+            if dry_run:
+                print(f"[dry-run] rm -rf \"{child}\"")
+            else:
+                shutil.rmtree(child)
+
+# 2. known_marketplaces.json entries identified by source.repo, regardless
+#    of the key under which they were registered.
+km_path = home / ".claude/plugins/known_marketplaces.json"
+if km_path.exists():
+    try:
+        data = json.loads(km_path.read_text())
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        changed = False
+        for key in list(data):
+            if matches_omc(data[key]):
+                del data[key]
+                changed = True
+        if changed:
+            if dry_run:
+                print(f"[dry-run] update JSON {km_path}")
+            else:
+                stamp = datetime.utcnow().isoformat().replace(":", "-").replace(".", "-")
+                shutil.copy2(km_path, km_path.with_name(km_path.name + f".pre-omc-uninstall-{stamp}.bak"))
+                km_path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+
 if [ "${REMOVE_HISTORY:-0}" = "1" ]; then
   HISTORY_REL=$(fp_get history_path)
   HISTORY_GREP=$(fp_get history_grep)
@@ -702,7 +792,67 @@ if claudemd.exists():
 else:
     record("claudemd-block-absent", "pass", "CLAUDE.md not present")
 
-# Check 6: OMC skill directories absent
+# Check 6: marketplaces by source.repo
+def _norm_repo(s):
+    if not isinstance(s, str):
+        return ""
+    s = s.strip().lower()
+    for prefix in ("https://github.com/", "http://github.com/", "git@github.com:", "ssh://git@github.com/"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    if s.endswith(".git"):
+        s = s[:-4]
+    if s.endswith("/"):
+        s = s[:-1]
+    return s
+
+
+def _candidates(obj):
+    if not isinstance(obj, dict):
+        return []
+    out = []
+    src = obj.get("source")
+    if isinstance(src, dict):
+        for k in ("repo", "url", "homepage", "repository"):
+            out.append(src.get(k))
+    for k in ("repo", "url", "homepage", "repository"):
+        out.append(obj.get(k))
+    return [c for c in out if isinstance(c, str)]
+
+
+_canon = {_norm_repo(u) for u in F.get("repo_urls", []) if u}
+_omc_marketplaces = []
+mkroot = home / ".claude/plugins/marketplaces"
+if mkroot.exists():
+    for child in mkroot.iterdir():
+        if not child.is_dir():
+            continue
+        meta = child / "marketplace.json"
+        if not meta.exists():
+            continue
+        try:
+            md = json.loads(meta.read_text())
+        except Exception:
+            continue
+        if any(_norm_repo(c) in _canon for c in _candidates(md)):
+            _omc_marketplaces.append(str(child))
+km_check = home / ".claude/plugins/known_marketplaces.json"
+if km_check.exists():
+    try:
+        km_data = json.loads(km_check.read_text())
+    except Exception:
+        km_data = None
+    if isinstance(km_data, dict):
+        for k, v in km_data.items():
+            if any(_norm_repo(c) in _canon for c in _candidates(v)):
+                _omc_marketplaces.append(f"{km_check}:{k}")
+if _omc_marketplaces:
+    record("marketplaces-by-source-clean", "fail", f"OMC marketplaces present: {_omc_marketplaces}")
+else:
+    record("marketplaces-by-source-clean", "pass")
+
+# Check 7: OMC skill directories absent
 skills = home / F["skill_root"]
 omc_skills = []
 explicit = set(F["skill_names_explicit"])
