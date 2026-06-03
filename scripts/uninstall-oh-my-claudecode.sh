@@ -7,6 +7,7 @@ YES=0
 TARGET="local"
 REMOVE_HISTORY=0
 REMOVE_BACKUPS=0
+FORCE_IN_SESSION=0
 
 # -----------------------------------------------------------------------------
 # FINGERPRINTS_JSON
@@ -104,6 +105,12 @@ Options:
   --local                Run cleanup on this machine. Default.
   --remove-history       Also scrub OMC entries from ~/.claude/history.jsonl.
   --remove-backups       Also delete OMC-related backup/history cache files under ~/.claude.
+  --force-in-session     Proceed even if an active Claude Code session is
+                         detected. Without this flag, local-mode runs abort
+                         when CLAUDECODE / CLAUDE_CODE_ENTRYPOINT /
+                         CLAUDE_PROJECT_DIR is set, because OMC's already-
+                         loaded hooks in the running agent can intercept
+                         cleanup. Has no effect with --target.
   -h, --help             Show help.
   --version              Show script version.
 
@@ -123,6 +130,48 @@ USAGE
 
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 
+# -----------------------------------------------------------------------------
+# in_session_detect
+#
+# Return 0 (success / detected) when this process appears to be driven by an
+# active Claude Code agent. Such runs cannot rely on JSON edits to
+# ~/.claude/settings.json to neutralize OMC hooks: the running session has
+# already loaded those hooks into memory, and any Bash call the agent makes
+# can be intercepted before our cleanup observes the effect.
+#
+# Signals (any one is sufficient):
+#   - env CLAUDECODE set (Claude Code sets this for tool subprocesses)
+#   - env CLAUDE_CODE_ENTRYPOINT set
+#   - env CLAUDE_PROJECT_DIR set
+#   - parent process command (ps -p $PPID -o comm=) begins with "claude"
+#
+# This check is only meaningful in local mode. SSH-target runs operate on a
+# remote machine that is not driven by the local Claude Code session, so the
+# caller bypasses this check.
+# -----------------------------------------------------------------------------
+in_session_detect() {
+  if [ -n "${CLAUDECODE:-}" ]; then
+    printf 'CLAUDECODE=%s' "$CLAUDECODE"
+    return 0
+  fi
+  if [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]; then
+    printf 'CLAUDE_CODE_ENTRYPOINT=%s' "$CLAUDE_CODE_ENTRYPOINT"
+    return 0
+  fi
+  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+    printf 'CLAUDE_PROJECT_DIR=%s' "$CLAUDE_PROJECT_DIR"
+    return 0
+  fi
+  parent_comm=$(ps -p "$PPID" -o comm= 2>/dev/null | tr -d ' ')
+  case "$parent_comm" in
+    claude|claude-code|*/claude|*/claude-code)
+      printf 'parent process: %s' "$parent_comm"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
@@ -135,12 +184,35 @@ while [ "$#" -gt 0 ]; do
     --local) TARGET="local" ;;
     --remove-history) REMOVE_HISTORY=1 ;;
     --remove-backups) REMOVE_BACKUPS=1 ;;
+    --force-in-session) FORCE_IN_SESSION=1 ;;
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "Unknown option: $1"; usage; exit 2 ;;
   esac
   shift
 done
+
+# In-session guard: only meaningful for local-mode cleanup.
+if [ "$TARGET" = "local" ]; then
+  if signal=$(in_session_detect); then
+    if [ "$FORCE_IN_SESSION" -eq 1 ]; then
+      warn "Detected an active Claude Code session ($signal)."
+      warn "Proceeding because --force-in-session was passed."
+      warn "OMC hooks already loaded into the running agent may continue to"
+      warn "fire for the remainder of that session even after this script"
+      warn "finishes. For a clean uninstall, exit Claude Code and re-run."
+      export DISABLE_OMC=1
+      export OMC_SKIP_HOOKS=all
+    else
+      printf 'ERROR: Detected an active Claude Code session (%s).\n' "$signal" >&2
+      printf 'Running this uninstaller from inside Claude Code lets OMC'\''s\n' >&2
+      printf 'already-loaded hooks intercept the cleanup. Exit Claude Code and\n' >&2
+      printf 're-run from a plain shell, or pass --force-in-session if you\n' >&2
+      printf 'understand the risk.\n' >&2
+      exit 4
+    fi
+  fi
+fi
 
 run_payload() {
   bash -s <<'PAYLOAD'

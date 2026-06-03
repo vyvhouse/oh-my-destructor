@@ -138,15 +138,46 @@ For future uninstallers, replace `OWNER/REPO` with the target oh-my repository.
 ## Options
 
 ```text
---dry-run          Show planned changes without modifying files.
---yes              Skip confirmation prompt.
---target HOST      Run over SSH on HOST.
---local            Run locally. Default.
---remove-history   Scrub OMC lines from ~/.claude/history.jsonl.
---remove-backups   Delete OMC-related backup/cache history files under ~/.claude.
---help             Show help.
---version          Show version.
+--dry-run            Show planned changes without modifying files.
+--yes                Skip confirmation prompt.
+--target HOST        Run over SSH on HOST.
+--local              Run locally. Default.
+--remove-history     Scrub OMC lines from ~/.claude/history.jsonl.
+--remove-backups     Delete OMC-related backup/cache history files under ~/.claude.
+--force-in-session   Proceed even if an active Claude Code session is detected.
+--help               Show help.
+--version            Show version.
 ```
+
+## Run Outside Claude Code
+
+The uninstaller refuses to run in local mode when it detects that the
+current process is being driven by an active Claude Code session. This is
+intentional: OMC's hooks are loaded into the running session in memory.
+Editing `~/.claude/settings.json` does not unload them, and the agent's
+`Bash` tool calls — including the ones invoking this script — can be
+intercepted by those hooks before any cleanup is observed.
+
+The script aborts with exit code `4` when any of these signals is present:
+
+- env `CLAUDECODE` is set
+- env `CLAUDE_CODE_ENTRYPOINT` is set
+- env `CLAUDE_PROJECT_DIR` is set
+- the parent process command is `claude` or `claude-code`
+
+The fix is to exit Claude Code and re-run from a plain terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scripts/uninstall-oh-my-claudecode.sh | bash -s -- --yes
+```
+
+`--target HOST` is never blocked, because the destructive work happens on
+the remote machine that is not driven by the local agent.
+
+If you must run from inside a session (for example, in a CI job that
+happens to set `CLAUDECODE`), pass `--force-in-session`. The script will
+proceed but warn you that hook-mediated effects in the current session may
+persist until that session ends.
 
 ## Safety
 

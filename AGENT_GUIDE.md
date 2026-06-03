@@ -47,6 +47,32 @@ If the slug is planned or missing, tell the user it is not implemented yet inste
 6. Verify through the real surface: command lookup, package manager, plugin registry, MCP list/config, and active file scan.
 7. Report what was removed, what was preserved, and what could not be verified.
 
+## Do Not Run From Inside The Session Under Audit
+
+Agents executing inside a Claude Code session that has OMC active **must
+not** drive the uninstaller from within that same session in local mode.
+OMC's hooks are already loaded into the running session, and Bash tool
+calls — including the one invoking this script — are intercepted by those
+hooks before the cleanup is observed.
+
+The uninstaller refuses to start in local mode when it detects any of:
+
+- env `CLAUDECODE` is set
+- env `CLAUDE_CODE_ENTRYPOINT` is set
+- env `CLAUDE_PROJECT_DIR` is set
+- the parent process command is `claude` or `claude-code`
+
+If you hit that exit code (`4`), the correct recovery is one of:
+
+1. Instruct the user to exit Claude Code and re-run the script from a plain
+   shell.
+2. Re-target the work onto a different host that this session is not driving
+   (`--target HOST`); the SSH path is never blocked.
+3. As a last resort and only with explicit user consent, pass
+   `--force-in-session`. Hook-mediated effects in the calling session may
+   persist until that session ends, so a follow-up verification pass from a
+   fresh shell is required.
+
 ## OMC Local Usage
 
 Dry-run:
