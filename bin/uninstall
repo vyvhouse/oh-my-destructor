@@ -14,6 +14,7 @@ Usage:
 Examples:
   bin/uninstall --list
   bin/uninstall oh-my-claudecode --dry-run
+  bin/uninstall lazycodex --dry-run
   bin/uninstall oh-my-claudecode --target macmini --yes
 USAGE
 }
@@ -22,6 +23,7 @@ list_removers() {
   cat <<'LIST'
 available:
   oh-my-claudecode  Remove Oh My Claude Code artifacts
+  lazycodex         Remove lazycodex and Codex OMO/Sisyphus Labs side effects
 
 planned:
   oh-my-openagent   Future remover for Oh My Open Agent
@@ -51,6 +53,9 @@ shift
 case "$slug" in
   oh-my-claudecode)
     exec "$ROOT_DIR/scripts/uninstall-oh-my-claudecode.sh" "$@"
+    ;;
+  lazycodex)
+    exec "$ROOT_DIR/scripts/uninstall-lazycodex.sh" "$@"
     ;;
   oh-my-openagent|oh-my-codex)
     printf 'Remover for %s is planned but not implemented yet.\n' "$slug" >&2

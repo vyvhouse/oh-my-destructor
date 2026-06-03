@@ -4,7 +4,7 @@ We have the right not to use oh-my tools.
 
 This repository hosts agent-native uninstall scripts for people who want help removing oh-my toolchains from their machines. The intent is simple: an agent should be able to inspect a machine, run a dry-run, remove known artifacts safely, and explain what changed.
 
-Current coverage is intentionally narrow and truthful: the included script removes [Oh My Claude Code](https://github.com/Yeachan-Heo/oh-my-claudecode) artifacts only. This repository is meant to grow into a home for uninstallers for related tools such as Oh My Open Agent, Oh My Claude Code, Oh My Codex, and other `oh-my-*` projects.
+Current coverage is intentionally narrow and truthful: the included scripts remove [Oh My Claude Code](https://github.com/Yeachan-Heo/oh-my-claudecode) artifacts and lazycodex/Codex OMO side effects. This repository is meant to grow into a home for uninstallers for related tools such as Oh My Open Agent, Oh My Claude Code, Oh My Codex, and other `oh-my-*` projects.
 
 For agent-specific operating instructions, see [AGENT_GUIDE.md](./AGENT_GUIDE.md). For the machine-readable catalog and contributor scaffold, see [`manifests/index.yml`](./manifests/index.yml) and [`docs/`](./docs/).
 
@@ -24,6 +24,7 @@ manifests/index.yml                   Catalog of available and planned removers.
 | Script | Status | Purpose |
 | --- | --- | --- |
 | `scripts/uninstall-oh-my-claudecode.sh` | Available | Remove Oh My Claude Code (OMC) from Claude Code local or SSH targets. |
+| `scripts/uninstall-lazycodex.sh` | Available | Remove lazycodex artifacts and Codex OMO/Sisyphus Labs plugin side effects. |
 | `scripts/uninstall-oh-my-openagent.sh` | Planned | Future remover for Oh My Open Agent artifacts. |
 | `scripts/uninstall-oh-my-codex.sh` | Planned | Future remover for Oh My Codex artifacts. |
 
@@ -58,7 +59,24 @@ If you cloned the repository, you can use the dispatcher instead:
 ```bash
 bin/uninstall oh-my-claudecode --dry-run
 bin/uninstall oh-my-claudecode --yes
+bin/uninstall lazycodex --dry-run
+bin/uninstall lazycodex --yes
 ```
+
+## lazycodex Cleanup
+
+`scripts/uninstall-lazycodex.sh` removes lazycodex user-level artifacts and the Codex OMO/Sisyphus Labs plugin side effects observed during lazycodex cleanup:
+
+- Known lazycodex global npm package names, if installed.
+- lazycodex CLI binaries/symlinks, if found.
+- lazycodex config/cache/state directories.
+- OMO/Sisyphus Labs plugin cache/data directories under `~/.codex/plugins`.
+- OMO/Sisyphus Labs TOML blocks from `~/.codex/config.toml`:
+  - `[plugins."omo@sisyphuslabs"]`
+  - `[marketplaces.sisyphuslabs]`
+  - `[hooks.state."omo@sisyphuslabs:..."]`
+
+It does not remove oh-my-codex / OMX, unrelated Codex plugins, unrelated MCP servers, or historical Codex session files by default.
 
 ## What The Current Script Removes
 

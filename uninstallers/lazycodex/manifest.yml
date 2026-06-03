@@ -1,0 +1,40 @@
+id: lazycodex
+name: lazycodex
+repo: null
+version: 0.1.0
+status: available
+supported_platforms:
+  - darwin
+  - linux
+script: ../../scripts/uninstall-lazycodex.sh
+manual: ../../docs/removers/lazycodex.md
+dry_run: true
+ssh_supported: true
+requires_sudo: false
+description: Removes lazycodex CLI/package artifacts and Codex OMO/Sisyphus Labs plugin side effects from user-level Codex config.
+remove_list:
+  - ~/.lazycodex
+  - ~/.config/lazycodex
+  - ~/.cache/lazycodex
+  - ~/Library/Application Support/lazycodex
+  - ~/Library/Caches/lazycodex
+  - ~/.codex/plugins/cache/sisyphuslabs
+  - ~/.codex/plugins/data/omo-sisyphuslabs
+  - '[plugins."omo@sisyphuslabs"] in ~/.codex/config.toml'
+  - '[marketplaces.sisyphuslabs] in ~/.codex/config.toml'
+  - '[hooks.state."omo@sisyphuslabs:..."] in ~/.codex/config.toml'
+  - known lazycodex global npm package names
+not_removed_by_default:
+  - ~/.codex/history.jsonl
+  - ~/.codex/sessions
+  - ~/.codex/cache historical files
+  - oh-my-codex / OMX
+  - unrelated Codex plugins
+  - unrelated MCP servers
+verification_commands:
+  - command -v lazycodex || true
+  - npm list -g --depth=0 2>/dev/null | grep -Ei 'lazycodex|lazy-codex' || true
+  - grep -E 'omo@sisyphuslabs|sisyphuslabs|hephaestus|bundled-rules' ~/.codex/config.toml || true
+unstar:
+  repo: null
+  command: null

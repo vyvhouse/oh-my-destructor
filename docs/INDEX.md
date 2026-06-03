@@ -12,6 +12,7 @@ This repository is organized as a catalog of explicit, conservative uninstallers
 ## Implemented Removers
 
 - [Oh My Claude Code](./removers/oh-my-claudecode.md)
+- [lazycodex](./removers/lazycodex.md)
 
 ## Templates
 

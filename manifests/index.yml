@@ -6,6 +6,12 @@ removers:
     manifest: ../uninstallers/oh-my-claudecode/manifest.yml
     script: ../scripts/uninstall-oh-my-claudecode.sh
     manual: ../docs/removers/oh-my-claudecode.md
+  - id: lazycodex
+    name: lazycodex
+    status: available
+    manifest: ../uninstallers/lazycodex/manifest.yml
+    script: ../scripts/uninstall-lazycodex.sh
+    manual: ../docs/removers/lazycodex.md
   - id: oh-my-openagent
     name: Oh My Open Agent
     status: planned
