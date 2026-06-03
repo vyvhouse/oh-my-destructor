@@ -16,13 +16,14 @@ Agents should discover available removers from the catalog first:
 manifests/index.yml
 ```
 
-This repository currently ships one implemented remover:
+This repository currently ships these implemented removers:
 
 ```text
 scripts/uninstall-oh-my-claudecode.sh
+scripts/uninstall-lazycodex.sh
 ```
 
-It removes Oh My Claude Code (OMC) artifacts only. Do not claim that it removes Oh My Open Agent, Oh My Codex, or other `oh-my-*` projects until matching scripts are added.
+They remove only their documented artifact sets. Do not claim that one remover covers Oh My Open Agent, Oh My Codex, or other `oh-my-*` projects until matching scripts are added.
 
 ## Discovery Contract
 
@@ -72,7 +73,25 @@ When the repository is cloned locally, agents may use the dispatcher:
 bin/uninstall --list
 bin/uninstall oh-my-claudecode --dry-run
 bin/uninstall oh-my-claudecode --yes
+bin/uninstall lazycodex --dry-run
+bin/uninstall lazycodex --yes
 ```
+
+## lazycodex Local Usage
+
+Dry-run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vyvhouse/oh-my-destructor/main/scripts/uninstall-lazycodex.sh | bash -s -- --dry-run
+```
+
+Remove:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vyvhouse/oh-my-destructor/main/scripts/uninstall-lazycodex.sh | bash -s -- --yes
+```
+
+The lazycodex remover also removes Codex OMO/Sisyphus Labs plugin side effects from `~/.codex/config.toml` and `~/.codex/plugins`, including `omo@sisyphuslabs` SessionStart hook trust blocks. It preserves oh-my-codex / OMX, unrelated Codex plugins, unrelated MCP servers, and Codex history by default.
 
 ## OMC SSH Usage
 
