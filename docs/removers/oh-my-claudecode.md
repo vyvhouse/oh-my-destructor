@@ -60,7 +60,37 @@ curl -fsSL https://raw.githubusercontent.com/vyv-house/oh-my-destructor/main/scr
 
 Use this only when the user explicitly wants historical references removed too.
 
-## Verification Checklist
+## Verification
+
+The uninstaller runs an automated verification phase after removal. It
+also exposes that phase as a standalone read-only check that you can run
+any time to ask "is OMC actually gone from this machine?".
+
+```bash
+# Standalone — does not modify anything:
+scripts/uninstall-oh-my-claudecode.sh --verify-only
+```
+
+Exit codes:
+
+| code | meaning |
+|---|---|
+| 0 | PASS — no OMC residue detected across any check |
+| 2 | FAIL — at least one OMC artifact still present |
+| 3 | INCONCLUSIVE — at least one check could not be executed (e.g. `npm` missing) with no FAIL outcomes |
+| 4 | Refused — invoked from inside an active Claude Code session without `--force-in-session` |
+
+For automation, add `--verify-json` to print a machine-readable result to
+stdout:
+
+```bash
+scripts/uninstall-oh-my-claudecode.sh --verify-only --verify-json
+```
+
+### Manual checklist (fallback)
+
+If you would rather inspect the surfaces by hand, the checks the script
+performs are equivalent to:
 
 ```bash
 command -v omc || true
