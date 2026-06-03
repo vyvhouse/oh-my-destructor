@@ -71,6 +71,17 @@ hook_text_markers:
   - omc-hud
   - omc-setup
 
+process_patterns:
+  - oh-my-claudecode
+  - oh-my-claude-sisyphus
+  - omc-hud
+  - omc-setup
+
+launch_agent_globs:
+  - "*oh-my-claudecode*.plist"
+  - "*oh-my-claude-sisyphus*.plist"
+  - "*omc*.plist"
+
 skill_root: .claude/skills
 
 skill_name_prefixes:

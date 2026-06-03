@@ -70,6 +70,17 @@ FINGERPRINTS_JSON=$(cat <<'JSON'
     "omc-hud",
     "omc-setup"
   ],
+  "process_patterns": [
+    "oh-my-claudecode",
+    "oh-my-claude-sisyphus",
+    "omc-hud",
+    "omc-setup"
+  ],
+  "launch_agent_globs": [
+    "*oh-my-claudecode*.plist",
+    "*oh-my-claude-sisyphus*.plist",
+    "*omc*.plist"
+  ],
   "skill_root": ".claude/skills",
   "skill_name_prefixes": ["omc-"],
   "skill_names_explicit": [
@@ -708,6 +719,72 @@ if omc_skills:
     record("skills-clean", "fail", f"OMC skill dirs: {omc_skills}")
 else:
     record("skills-clean", "pass")
+
+# Check 7: Claude CLI-visible OMC plugin/MCP residue absent.
+claude = shutil.which("claude")
+if claude:
+    cli_failures = []
+    cli_errors = []
+    for label, args in (
+        ("plugin", [claude, "plugin", "list"]),
+        ("mcp", [claude, "mcp", "list"]),
+    ):
+        proc = subprocess.run(args, capture_output=True, text=True)
+        output = f"{proc.stdout}\n{proc.stderr}"
+        if proc.returncode != 0:
+            cli_errors.append(f"claude {label} list exited {proc.returncode}")
+        elif has_omc_text(output):
+            cli_failures.append(f"claude {label} list contains OMC markers")
+    if cli_failures:
+        record("claude-cli-clean", "fail", "; ".join(cli_failures))
+    elif cli_errors:
+        record("claude-cli-clean", "inconclusive", "; ".join(cli_errors))
+    else:
+        record("claude-cli-clean", "pass")
+else:
+    record("claude-cli-clean", "inconclusive", "claude CLI not available")
+
+# Check 8: OMC-looking live processes absent.
+patterns = [p.lower() for p in F.get("process_patterns", [])]
+try:
+    proc = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True)
+except OSError as exc:
+    record("processes-clean", "inconclusive", f"ps failed: {exc}")
+else:
+    matches = []
+    self_pid = os.getpid()
+    for line in proc.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        pid_text, _, command = stripped.partition(" ")
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            pid = -1
+        lower = command.lower()
+        if pid == self_pid or "uninstall-oh-my-claudecode" in lower:
+            continue
+        if any(pattern in lower for pattern in patterns):
+            matches.append(stripped)
+    if matches:
+        record("processes-clean", "fail", "live matches: " + "; ".join(matches[:5]))
+    else:
+        record("processes-clean", "pass")
+
+# Check 9: macOS OMC LaunchAgents absent.
+if sys.platform == "darwin":
+    launch_dir = home / "Library/LaunchAgents"
+    matches = []
+    if launch_dir.exists():
+        for pattern in F.get("launch_agent_globs", []):
+            matches.extend(str(p) for p in launch_dir.glob(pattern))
+    if matches:
+        record("launch-agents-clean", "fail", f"present: {sorted(set(matches))}")
+    else:
+        record("launch-agents-clean", "pass")
+else:
+    record("launch-agents-clean", "pass", "not macOS")
 
 # Decide exit code
 has_fail = any(s == "fail" for _, s, _ in results)
