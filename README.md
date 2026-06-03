@@ -1,5 +1,7 @@
 # oh-my Tool Uninstallers
 
+[![ci](https://github.com/vyvhouse/oh-my-destructor/actions/workflows/ci.yml/badge.svg)](https://github.com/vyvhouse/oh-my-destructor/actions/workflows/ci.yml)
+
 We have the right not to use oh-my tools.
 
 This repository hosts agent-native uninstall scripts for people who want help removing oh-my toolchains from their machines. The intent is simple: an agent should be able to inspect a machine, run a dry-run, remove known artifacts safely, and explain what changed.
