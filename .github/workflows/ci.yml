@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - name: shellcheck
+        run: shellcheck -S warning scripts/*.sh bin/uninstall
+      - name: bash -n
+        run: |
+          set -eu
+          for f in scripts/*.sh bin/uninstall; do
+            bash -n "$f"
+          done
+      - name: --help smoke
+        run: scripts/uninstall-oh-my-claudecode.sh --help
+      - name: --version smoke
+        run: scripts/uninstall-oh-my-claudecode.sh --version
+      - name: --dry-run smoke
+        run: scripts/uninstall-oh-my-claudecode.sh --dry-run
+
+  fingerprints-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify fingerprints.yml mirrors FINGERPRINTS_JSON
+        run: python3 scripts/check-fingerprints-sync.py
+
+  integration:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run fixture suite
+        shell: bash
+        run: |
+          set -eu
+          chmod +x tests/run.sh
+          tests/run.sh
