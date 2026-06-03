@@ -77,11 +77,6 @@ process_patterns:
   - omc-hud
   - omc-setup
 
-launch_agent_globs:
-  - "*oh-my-claudecode*.plist"
-  - "*oh-my-claude-sisyphus*.plist"
-  - "*omc*.plist"
-
 skill_root: .claude/skills
 
 skill_name_prefixes:
@@ -109,3 +104,15 @@ backup_path_globs:
 
 repo_urls:
   - Yeachan-Heo/oh-my-claudecode
+
+process_patterns:
+  - oh-my-claude
+  - '/\.omc/'
+  - omc-hud
+  - ralph-loop
+  - ultrawork-loop
+  - autopilot-loop
+
+launchagent_globs:
+  - "*omc*.plist"
+  - "*oh-my-claude*.plist"
