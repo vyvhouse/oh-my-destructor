@@ -10,6 +10,7 @@ REMOVE_BACKUPS=0
 FORCE_IN_SESSION=0
 VERIFY_ONLY=0
 VERIFY_JSON=0
+PURGE_BACKUPS=0
 
 # -----------------------------------------------------------------------------
 # FINGERPRINTS_JSON
@@ -130,6 +131,11 @@ Options:
                          Combine with --verify-json for machine output.
   --verify-json          Emit verification results as a JSON document to
                          stdout. Human-readable summary still goes to stderr.
+  --purge-omc-backups    After verify passes (exit 0), also delete:
+                         (a) script-generated *.pre-omc-uninstall-*.bak files
+                         under ~/.claude, and (b) user-made *.bak / *.backup /
+                         *.old files in scoped directories whose contents
+                         contain OMC markers. Refuses if verify did not pass.
   -h, --help             Show help.
   --version              Show script version.
 
@@ -213,6 +219,7 @@ while [ "$#" -gt 0 ]; do
     --force-in-session) FORCE_IN_SESSION=1 ;;
     --verify-only) VERIFY_ONLY=1 ;;
     --verify-json) VERIFY_JSON=1 ;;
+    --purge-omc-backups) PURGE_BACKUPS=1 ;;
     --version) printf '%s\n' "$VERSION"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "Unknown option: $1"; usage; exit 2 ;;
@@ -970,6 +977,83 @@ else:
 sys.exit(exit_code)
 PY
 verify_exit=$?
+
+if [ "${PURGE_BACKUPS:-0}" = "1" ]; then
+  # Refuse only on verified residue (exit 2). INCONCLUSIVE (exit 3) is allowed
+  # because it only means a probe was unavailable (e.g. npm missing), not
+  # that residue exists.
+  if [ "$verify_exit" = "2" ]; then
+    printf 'refused --purge-omc-backups: verify reported residue (exit 2); re-run main removal first\n' >&2
+  else
+    python3 - <<'PY'
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+home = Path.home()
+dry_run = os.environ.get("DRY_RUN") == "1"
+F = json.loads(os.environ["FINGERPRINTS_JSON"])
+omc_terms = tuple(F["terms"])
+raw_subs = tuple(F["raw_substrings"])
+
+
+def has_omc_text(text):
+    lower = text.lower()
+    if any(t in lower for t in omc_terms):
+        return True
+    return any(r in lower for r in raw_subs)
+
+
+script_bak_re = re.compile(r"\.pre-omc-uninstall[-.]")
+user_bak_suffixes = (".bak", ".backup", ".old")
+
+scope_roots = [home / ".claude", home / ".config/claude", home / ".omc"]
+removed = []
+
+for root in scope_roots:
+    if not root.exists():
+        continue
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        name = path.name
+        if script_bak_re.search(name):
+            if dry_run:
+                print(f"[dry-run] purge {path} (script-generated backup)")
+            else:
+                try:
+                    path.unlink()
+                except OSError as exc:
+                    print(f"WARN: could not purge {path}: {exc}", file=sys.stderr)
+                    continue
+            removed.append(str(path))
+            continue
+        if any(name.endswith(suf) for suf in user_bak_suffixes):
+            try:
+                text = path.read_text(errors="ignore")
+            except OSError:
+                continue
+            if has_omc_text(text):
+                if dry_run:
+                    print(f"[dry-run] purge {path} (OMC-tainted user backup)")
+                else:
+                    try:
+                        path.unlink()
+                    except OSError as exc:
+                        print(f"WARN: could not purge {path}: {exc}", file=sys.stderr)
+                        continue
+                removed.append(str(path))
+
+if removed:
+    print(f"purge: removed {len(removed)} OMC-tainted backup file(s)")
+else:
+    print("purge: no OMC-tainted backups found")
+PY
+  fi
+fi
+
 exit $verify_exit
 PAYLOAD
 }
@@ -988,6 +1072,7 @@ if [ "$TARGET" != "local" ]; then
   [ "$REMOVE_BACKUPS" -eq 1 ] && remote_args="$remote_args --remove-backups"
   [ "$VERIFY_ONLY" -eq 1 ] && remote_args="$remote_args --verify-only"
   [ "$VERIFY_JSON" -eq 1 ] && remote_args="$remote_args --verify-json"
+  [ "$PURGE_BACKUPS" -eq 1 ] && remote_args="$remote_args --purge-omc-backups"
   ssh "$TARGET" "tmp=\$(mktemp); cat > \"\$tmp\"; chmod +x \"\$tmp\"; \"\$tmp\" $remote_args; rc=\$?; rm -f \"\$tmp\"; exit \$rc" < "$0"
   exit $?
 fi
@@ -1003,5 +1088,6 @@ fi
 
 DRY_RUN=$DRY_RUN REMOVE_HISTORY=$REMOVE_HISTORY REMOVE_BACKUPS=$REMOVE_BACKUPS \
   VERIFY_ONLY=$VERIFY_ONLY VERIFY_JSON=$VERIFY_JSON \
+  PURGE_BACKUPS=$PURGE_BACKUPS \
   run_payload
 exit $?
