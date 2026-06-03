@@ -3,6 +3,7 @@ set -u
 
 VERSION="0.1.0"
 PROJECT_NAME="lazycodex"
+# shellcheck disable=SC2034 # reserved for shared uninstaller metadata
 PROJECT_SLUG="lazycodex"
 DRY_RUN=0
 YES=0
